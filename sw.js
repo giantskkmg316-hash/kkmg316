@@ -1,7 +1,7 @@
 // かんたん家計簿 - Service Worker
 // オフラインで動作させるため、アプリ本体一式をキャッシュします。
 // バージョンを上げる（v1 -> v2 など）と、古いキャッシュを破棄して更新を配信します。
-var CACHE_NAME = "kakeibo-cache-v1";
+var CACHE_NAME = "kakeibo-cache-v2";
 var APP_SHELL = [
   "./",
   "./index.html",
