@@ -115,6 +115,7 @@
   .field:last-of-type{ margin-bottom:0; }
   .field label{ font-size:12.5px; color:var(--ink-soft); }
   .field input[type="number"],
+  .field input[type="date"],
   .field input[type="text"],
   .field select{
     width:100%;
@@ -135,8 +136,6 @@
     background-size:14px 9px;
     padding-right:36px;
   }
-  .field-row{ display:flex; gap:10px; }
-  .field-row .field{ flex:1; }
 
   .btn{
     border:none; border-radius:12px; font-size:15px; font-weight:700;
@@ -146,9 +145,6 @@
   .btn-primary{ background:var(--indigo); color:#fff; }
   .btn-primary:active{ background:var(--indigo-deep); }
   .btn-secondary{ background:var(--ink); color:#fff; }
-  .btn-outline{
-    background:transparent; color:var(--indigo); border:1px solid var(--indigo);
-  }
 
   /* save flash feedback */
   .card.is-flash{ animation:flashCard .55s ease; }
@@ -165,8 +161,15 @@
   }
   .is-shake{ animation:shake .3s ease; }
 
-  /* ---------- Recent list ---------- */
-  .tx-list{ list-style:none; margin:0; padding:0; }
+  /* ---------- Recent list & Daily Groups ---------- */
+  .tx-group-header{
+    display:flex; justify-content:space-between; align-items:center;
+    font-size:13px; font-weight:700; color:var(--indigo);
+    background:var(--paper); padding:8px 12px; border-radius:8px;
+    margin-top:14px; margin-bottom:6px; border:1px solid var(--line-soft);
+  }
+  .tx-group-header:first-child{ margin-top:0; }
+  .tx-list{ list-style:none; margin:0 0 10px; padding:0; }
   .tx-row{
     display:flex; align-items:center; gap:10px;
     padding:11px 0; border-bottom:1px solid var(--line-soft);
@@ -188,7 +191,17 @@
     padding:6px 2px 2px;
   }
 
-  /* ---------- Fixed cost card (deliberately the boldest element) ---------- */
+  /* ---------- Daily breakdown list in Report ---------- */
+  .daily-list{ display:flex; flex-direction:column; gap:8px; }
+  .daily-row{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:10px 12px; background:var(--paper); border-radius:8px;
+    border:1px solid var(--line-soft);
+  }
+  .daily-date{ font-size:13.5px; font-weight:600; }
+  .daily-amount{ font-size:14.5px; font-weight:700; color:var(--indigo); }
+
+  /* ---------- Fixed cost card ---------- */
   .card--fixed{
     position:relative;
     background:var(--stamp-soft);
@@ -196,7 +209,6 @@
     overflow:visible;
   }
   .card--fixed::before{
-    /* washi-tape accent, a single considered flourish */
     content:"";
     position:absolute;
     top:-10px; left:22px;
@@ -303,9 +315,13 @@
 
     <section class="card" aria-labelledby="tx-title">
       <h2 class="card__title" id="tx-title">支出を記録する</h2>
-      <p class="card__hint">金額と用途を選んで記録すると、日時が自動で保存されます。</p>
+      <p class="card__hint">日付、金額、用途を選んで記録します（前日分などの遡り入力も可能です）。</p>
 
       <form id="tx-form" novalidate>
+        <div class="field">
+          <label for="date-input">日付</label>
+          <input type="date" id="date-input" name="date" required>
+        </div>
         <div class="field amount-field">
           <label for="amount-input">金額</label>
           <input type="number" id="amount-input" name="amount" inputmode="numeric"
@@ -332,8 +348,8 @@
 
     <section class="card" aria-labelledby="recent-title">
       <h2 class="card__title" id="recent-title">最近の記録</h2>
-      <p class="card__hint">今月分を新しい順に表示しています。誤って記録した場合は削除できます。</p>
-      <ul class="tx-list" id="tx-list"></ul>
+      <p class="card__hint">今月分を日ごとにグループ化して表示しています。</p>
+      <div id="tx-group-container"></div>
       <p class="empty-note" id="tx-empty" hidden>まだ記録がありません。上のフォームから記録してみましょう。</p>
     </section>
 
@@ -381,6 +397,13 @@
           <p class="stat-card__sub" id="stat-last-sub">固定費 ¥0 を含む</p>
         </div>
       </div>
+    </section>
+
+    <section class="card" aria-labelledby="daily-report-title">
+      <h2 class="card__title" id="daily-report-title">今月の日別合計</h2>
+      <p class="card__hint">日ごとの変動費合計金額の一覧です。</p>
+      <div class="daily-list" id="daily-list"></div>
+      <p class="empty-note" id="daily-empty" hidden>今月の記録はまだありません。</p>
     </section>
 
     <section class="card" aria-labelledby="breakdown-title">
@@ -450,10 +473,24 @@
   function formatYen(n){
     return "¥" + Math.round(n || 0).toLocaleString("ja-JP");
   }
-  function formatDateTime(iso){
+  function getTodayDateString(){
+    var d = new Date();
+    var yyyy = d.getFullYear();
+    var mm = String(d.getMonth() + 1).padStart(2, '0');
+    var dd = String(d.getDate()).padStart(2, '0');
+    return yyyy + "-" + mm + "-" + dd;
+  }
+  function formatDateHeader(dateKey){
+    var parts = dateKey.split("-");
+    if(parts.length !== 3) return dateKey;
+    var d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    var days = ["日", "月", "火", "水", "木", "金", "土"];
+    return parseInt(parts[1], 10) + "月" + parseInt(parts[2], 10) + "日 (" + days[d.getDay()] + ")";
+  }
+  function formatTime(iso){
     var d = new Date(iso);
     if (isNaN(d.getTime())) return "";
-    return d.toLocaleString("ja-JP", { month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit" });
+    return d.toLocaleTimeString("ja-JP", { hour:"2-digit", minute:"2-digit" });
   }
   function startOfMonth(offset){
     var d = new Date();
@@ -489,9 +526,13 @@
 
   /* ---------------- Transaction form ---------------- */
   var txForm = document.getElementById("tx-form");
+  var dateInput = document.getElementById("date-input");
   var amountInput = document.getElementById("amount-input");
   var categorySelect = document.getElementById("category-select");
   var memoInput = document.getElementById("memo-input");
+
+  // 初期値に本日の日付を設定
+  dateInput.value = getTodayDateString();
 
   function markError(fieldEl){
     var wrap = fieldEl.closest(".field");
@@ -505,13 +546,20 @@
 
   txForm.addEventListener("submit", function(e){
     e.preventDefault();
+    var selectedDate = dateInput.value;
     var amount = parseInt(amountInput.value, 10);
     var category = categorySelect.value;
     var ok = true;
 
+    if (!selectedDate){ markError(dateInput); ok = false; }
     if (!amount || amount <= 0){ markError(amountInput); ok = false; }
     if (!category){ markError(categorySelect); ok = false; }
     if (!ok) return;
+
+    // 選択された日付に現在の時刻を合わせてISO保存
+    var now = new Date();
+    var timeStr = now.toTimeString().split(" ")[0];
+    var fullDateTime = new Date(selectedDate + "T" + timeStr).toISOString();
 
     var list = loadTx();
     list.unshift({
@@ -519,13 +567,15 @@
       amount: amount,
       category: category,
       memo: memoInput.value.trim().slice(0, 40),
-      datetime: new Date().toISOString()
+      datetime: fullDateTime,
+      dateKey: selectedDate
     });
     saveTx(list);
 
     amountInput.value = "";
     categorySelect.value = "";
     memoInput.value = "";
+    dateInput.value = getTodayDateString(); // 本日の日付にリセット
 
     var card = txForm.closest(".card");
     card.classList.remove("is-flash"); void card.offsetWidth; card.classList.add("is-flash");
@@ -534,8 +584,8 @@
     toast("記録しました");
   });
 
-  /* ---------------- Recent list ---------------- */
-  var txListEl = document.getElementById("tx-list");
+  /* ---------------- Recent list (Grouped by Date) ---------------- */
+  var txGroupContainer = document.getElementById("tx-group-container");
   var txEmptyEl = document.getElementById("tx-empty");
 
   function renderTxList(){
@@ -544,27 +594,58 @@
       .filter(function(t){ return new Date(t.datetime) >= start; })
       .sort(function(a,b){ return new Date(b.datetime) - new Date(a.datetime); });
 
-    txListEl.innerHTML = "";
+    txGroupContainer.innerHTML = "";
     txEmptyEl.hidden = all.length > 0;
 
+    // 日付ごとにグループ化
+    var groups = {};
+    var groupOrder = [];
+
     all.forEach(function(t){
-      var cat = CAT_MAP[t.category] || { label:t.category, color:"#8B98A5" };
-      var li = document.createElement("li");
-      li.className = "tx-row";
-      li.innerHTML =
-        '<span class="tx-dot" style="--dot:' + cat.color + '"></span>' +
-        '<span class="tx-main">' +
-          '<span class="tx-cat">' + escapeHtml(cat.label) + '</span>' +
-          '<span class="tx-meta">' + formatDateTime(t.datetime) +
-            (t.memo ? "・" + escapeHtml(t.memo) : "") + '</span>' +
-        '</span>' +
-        '<span class="tx-amount">' + formatYen(t.amount) + '</span>' +
-        '<button type="button" class="tx-del" aria-label="削除" data-id="' + t.id + '">×</button>';
-      txListEl.appendChild(li);
+      var dk = t.dateKey || t.datetime.slice(0, 10);
+      if (!groups[dk]){
+        groups[dk] = { total: 0, items: [] };
+        groupOrder.push(dk);
+      }
+      groups[dk].total += t.amount;
+      groups[dk].items.push(t);
+    });
+
+    groupOrder.forEach(function(dk){
+      var grp = groups[dk];
+      
+      // グループヘッダー（日付と日毎の合計金額）
+      var header = document.createElement("div");
+      header.className = "tx-group-header";
+      header.innerHTML =
+        '<span>' + escapeHtml(formatDateHeader(dk)) + '</span>' +
+        '<span>計 ' + formatYen(grp.total) + '</span>';
+      txGroupContainer.appendChild(header);
+
+      var ul = document.createElement("ul");
+      ul.className = "tx-list";
+
+      grp.items.forEach(function(t){
+        var cat = CAT_MAP[t.category] || { label:t.category, color:"#8B98A5" };
+        var li = document.createElement("li");
+        li.className = "tx-row";
+        li.innerHTML =
+          '<span class="tx-dot" style="--dot:' + cat.color + '"></span>' +
+          '<span class="tx-main">' +
+            '<span class="tx-cat">' + escapeHtml(cat.label) + '</span>' +
+            '<span class="tx-meta">' + formatTime(t.datetime) +
+              (t.memo ? "・" + escapeHtml(t.memo) : "") + '</span>' +
+          '</span>' +
+          '<span class="tx-amount">' + formatYen(t.amount) + '</span>' +
+          '<button type="button" class="tx-del" aria-label="削除" data-id="' + t.id + '">×</button>';
+        ul.appendChild(li);
+      });
+
+      txGroupContainer.appendChild(ul);
     });
   }
 
-  txListEl.addEventListener("click", function(e){
+  txGroupContainer.addEventListener("click", function(e){
     var btn = e.target.closest(".tx-del");
     if (!btn) return;
     if (!confirm("この記録を削除しますか？")) return;
@@ -641,6 +722,7 @@
     var start = startOfMonth(offset);
     var end = startOfMonth(offset + 1);
     var byCategory = {};
+    var dailyTotals = {};
     CATEGORIES.forEach(function(c){ byCategory[c.id] = 0; });
 
     var variableTotal = 0;
@@ -649,17 +731,28 @@
       if (dt >= start && dt < end){
         byCategory[t.category] = (byCategory[t.category] || 0) + t.amount;
         variableTotal += t.amount;
+
+        var dk = t.dateKey || t.datetime.slice(0, 10);
+        dailyTotals[dk] = (dailyTotals[dk] || 0) + t.amount;
       }
     });
 
     var fixedTotal = loadFixed().reduce(function(s,f){ return s + f.amount; }, 0);
-    return { variableTotal:variableTotal, fixedTotal:fixedTotal, total:variableTotal+fixedTotal, byCategory:byCategory };
+    return { 
+      variableTotal: variableTotal, 
+      fixedTotal: fixedTotal, 
+      total: variableTotal + fixedTotal, 
+      byCategory: byCategory,
+      dailyTotals: dailyTotals
+    };
   }
 
   var statThisTotal = document.getElementById("stat-this-total");
   var statThisSub = document.getElementById("stat-this-sub");
   var statLastTotal = document.getElementById("stat-last-total");
   var statLastSub = document.getElementById("stat-last-sub");
+  var dailyListEl = document.getElementById("daily-list");
+  var dailyEmptyEl = document.getElementById("daily-empty");
   var barListEl = document.getElementById("bar-list");
   var reportEmptyEl = document.getElementById("report-empty");
 
@@ -672,6 +765,21 @@
     statLastTotal.textContent = formatYen(lastM.total);
     statLastSub.textContent = "固定費 " + formatYen(lastM.fixedTotal) + " を含む";
 
+    // 日別合計一覧の描画
+    dailyListEl.innerHTML = "";
+    var dailyKeys = Object.keys(thisM.dailyTotals).sort().reverse();
+    dailyEmptyEl.hidden = dailyKeys.length > 0;
+
+    dailyKeys.forEach(function(dk){
+      var div = document.createElement("div");
+      div.className = "daily-row";
+      div.innerHTML =
+        '<span class="daily-date">' + escapeHtml(formatDateHeader(dk)) + '</span>' +
+        '<span class="daily-amount">' + formatYen(thisM.dailyTotals[dk]) + '</span>';
+      dailyListEl.appendChild(div);
+    });
+
+    // カテゴリ別内訳の描画
     var rows = CATEGORIES
       .map(function(c){ return { label:c.label, value:thisM.byCategory[c.id], color:c.color, fixed:false }; })
       .filter(function(r){ return r.value > 0; });
@@ -708,7 +816,7 @@
 
   if ("serviceWorker" in navigator){
     window.addEventListener("load", function(){
-      navigator.serviceWorker.register("sw.js").catch(function(){ /* offline-first: safe to ignore */ });
+      navigator.serviceWorker.register("sw.js").catch(function(){ /* offline-first */ });
     });
   }
 })();
